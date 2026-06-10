@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground: #f1f5f9;
+  --background: #0f172a;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ボートカラー枠 */
+.boat-border-1 { border-left: 4px solid #e5e7eb; }
+.boat-border-2 { border-left: 4px solid #374151; }
+.boat-border-3 { border-left: 4px solid #ef4444; }
+.boat-border-4 { border-left: 4px solid #3b82f6; }
+.boat-border-5 { border-left: 4px solid #eab308; }
+.boat-border-6 { border-left: 4px solid #22c55e; }
+
+/* カスタムスクロールバー */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #1e293b; }
+::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }

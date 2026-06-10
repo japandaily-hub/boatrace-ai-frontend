@@ -1,0 +1,27 @@
+# Next.js
+.next/
+out/
+build/
+
+# 依存パッケージ
+node_modules/
+
+# 環境変数（秘密情報は絶対コミットしない）
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# エディタ
+.vscode/
+.idea/
+
+# Vercel
+.vercel/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
