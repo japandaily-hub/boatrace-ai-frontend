@@ -220,7 +220,11 @@ export default function HomePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/races?date=${date}`);
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE;
+      const url = apiBase
+        ? `${apiBase}/api/races?date=${date}`
+        : `/api/races?date=${date}`;
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRaces(data.races ?? []);

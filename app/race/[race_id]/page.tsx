@@ -302,7 +302,11 @@ export default function RaceDetailPage() {
 
   const fetchRace = useCallback(async () => {
     try {
-      const res = await fetch(`/api/race/${raceId}`);
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE;
+      const url = apiBase
+        ? `${apiBase}/api/race/${raceId}`
+        : `/api/race/${raceId}`;
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRace(data);

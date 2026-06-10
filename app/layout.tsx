@@ -24,9 +24,15 @@ export default function RootLayout({
             <nav className="flex items-center gap-4 text-sm text-slate-400">
               <a href="/" className="hover:text-white transition-colors">レース一覧</a>
               <span className="text-slate-600">|</span>
-              <span className="rounded bg-sky-900 px-2 py-0.5 text-xs text-sky-300">
-                β版 - モックデータ
-              </span>
+              {process.env.NEXT_PUBLIC_API_BASE ? (
+                <span className="rounded bg-green-900 px-2 py-0.5 text-xs text-green-300">
+                  本番データ
+                </span>
+              ) : (
+                <span className="rounded bg-sky-900 px-2 py-0.5 text-xs text-sky-300">
+                  β版 - モックデータ
+                </span>
+              )}
             </nav>
           </div>
         </header>
