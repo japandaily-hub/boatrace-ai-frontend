@@ -1,305 +1,748 @@
-"use client";
+/**
+ * app/page.tsx — LP（ランディングページ）
+ * Web Designer 7セクション仕様 + デザイントークン準拠
+ * デザイナー仕様: S1ヒーロー〜S7フッター
+ * コピー: copywriter-result.md §1 確定稿投入済み (Wave 7 / integration / 2026-06-11)
+ */
 
-import { useEffect, useState, useCallback } from "react";
-import { format, addDays, parseISO } from "date-fns";
-import clsx from "clsx";
+import Link from "next/link";
+import { Suspense } from "react";
+import { VerificationBadge } from "@/components/VerificationBadge";
+import { RaceCard, RaceCardSkeleton, Race } from "@/components/RaceCard";
+import { RoadmapTimeline } from "@/components/RoadmapTimeline";
+import { FaqAccordion } from "@/components/FaqAccordion";
+import { Footer } from "@/components/Footer";
 
-// ─── 型定義 ───────────────────────────────────────────────────
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ??
+  "https://sxhxd2rkyl.execute-api.ap-northeast-1.amazonaws.com/prod";
 
-type RaceStatus = "upcoming" | "open" | "closed" | "finished";
-
-interface RaceSummary {
-  race_id: string;
-  date: string;
-  jyo_cd: string;
-  jyo_name: string;
-  race_no: number;
-  race_title: string;
-  status: RaceStatus;
-  scheduled_time: string;
-  grade: string;
-  weather: string;
-  wind_speed: number;
-  wave_height: number;
-  rough_water_index: number;
-  tide_phase: string;
-  entry_count: number;
-  top_pick: string | null;
-  top_predicted_win: number;
+/** 今日の日付を YYYY-MM-DD 形式で返す (JST) */
+function getTodayJST(): string {
+  return new Date().toLocaleDateString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).replace(/\//g, "-");
 }
 
-// ─── 定数 ────────────────────────────────────────────────────
-
-const STATUS_LABEL: Record<RaceStatus, string> = {
-  upcoming: "発売前",
-  open:     "発売中",
-  closed:   "締切",
-  finished: "確定",
-};
-
-const STATUS_COLOR: Record<RaceStatus, string> = {
-  upcoming: "bg-slate-600 text-slate-200",
-  open:     "bg-green-700 text-green-100",
-  closed:   "bg-amber-700 text-amber-100",
-  finished: "bg-slate-700 text-slate-300",
-};
-
-const GRADE_COLOR: Record<string, string> = {
-  SG:   "text-yellow-300 font-bold",
-  G1:   "text-orange-300 font-bold",
-  G2:   "text-sky-300",
-  G3:   "text-teal-300",
-  "一般": "text-slate-400",
-};
-
-// ─── サブコンポーネント ────────────────────────────────────────
-
-function DateNav({
-  date,
-  onChange,
-}: {
-  date: string;
-  onChange: (d: string) => void;
-}) {
-  const d = parseISO(date);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(d, i - 3));
-
-  return (
-    <div className="flex items-center gap-1 overflow-x-auto pb-1">
-      <button
-        onClick={() => onChange(format(addDays(d, -1), "yyyy-MM-dd"))}
-        className="shrink-0 rounded p-2 text-slate-400 hover:bg-slate-700 hover:text-white"
-      >
-        ‹
-      </button>
-      {days.map((day) => {
-        const str = format(day, "yyyy-MM-dd");
-        const active = str === date;
-        return (
-          <button
-            key={str}
-            onClick={() => onChange(str)}
-            className={clsx(
-              "shrink-0 rounded px-3 py-1.5 text-sm transition-colors",
-              active
-                ? "bg-sky-600 text-white"
-                : "text-slate-400 hover:bg-slate-700 hover:text-white",
-            )}
-          >
-            <div className="text-xs">{format(day, "M/d")}</div>
-            <div className="text-[10px] leading-none text-slate-400">
-              {["日", "月", "火", "水", "木", "金", "土"][day.getDay()]}
-            </div>
-          </button>
-        );
-      })}
-      <button
-        onClick={() => onChange(format(addDays(d, 1), "yyyy-MM-dd"))}
-        className="shrink-0 rounded p-2 text-slate-400 hover:bg-slate-700 hover:text-white"
-      >
-        ›
-      </button>
-    </div>
-  );
+/** S3キャッシュ or 静的フォールバックからレースデータを取得 */
+async function fetchPreviewRaces(): Promise<{
+  races: Race[];
+  fetchedAt: string | null;
+  dataSource: string;
+}> {
+  const date = getTodayJST();
+  try {
+    const res = await fetch(`${API_BASE}/api/races?date=${date}`, {
+      next: { revalidate: 300 }, // 5分キャッシュ
+    });
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const data = await res.json();
+    const races: Race[] = Array.isArray(data) ? data : (data.races ?? []);
+    // LP上には先着3件のみ表示
+    return {
+      races: races.slice(0, 3),
+      fetchedAt: data.fetched_at ?? data.created_at ?? null,
+      dataSource: data.data_source ?? "unknown",
+    };
+  } catch {
+    return { races: [], fetchedAt: null, dataSource: "error" };
+  }
 }
 
-function WaveIndex({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  const color =
-    value < 0.2 ? "bg-green-500"
-    : value < 0.4 ? "bg-lime-500"
-    : value < 0.6 ? "bg-yellow-500"
-    : value < 0.8 ? "bg-orange-500"
-    : "bg-red-500";
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-700">
-        <div className={clsx("h-full rounded-full", color)} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs text-slate-400">{pct}</span>
-    </div>
-  );
+/** 最終更新時刻を JST HH:MM 形式で表示 */
+function formatFetchedAt(fetchedAt: string | null): string {
+  if (!fetchedAt) return "--:--（準備中）";
+  try {
+    return new Date(fetchedAt).toLocaleTimeString("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "--:--";
+  }
 }
 
-function RaceCard({ race }: { race: RaceSummary }) {
+// ─────────────────────────────────────────────
+// S3: レースプレビューセクション (非同期RSC)
+// ─────────────────────────────────────────────
+async function RacePreviewSection() {
+  const { races, fetchedAt } = await fetchPreviewRaces();
+
   return (
-    <a
-      href={`/race/${race.race_id}`}
-      className={clsx(
-        "block rounded-lg border border-slate-700 bg-slate-800 p-4",
-        "hover:border-sky-500 hover:bg-slate-750 transition-colors",
-        race.status === "finished" && "opacity-70",
-      )}
+    <section
+      id="preview"
+      style={{
+        background: "var(--color-bg-secondary)",
+        padding: "var(--space-16) 0",
+      }}
     >
-      <div className="flex items-start justify-between gap-2">
-        {/* 左カラム */}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-lg font-bold text-white">
-              {race.jyo_name} {race.race_no}R
-            </span>
-            <span className={clsx("text-xs", GRADE_COLOR[race.grade] ?? "text-slate-400")}>
-              {race.grade}
-            </span>
-            <span
-              className={clsx(
-                "rounded px-1.5 py-0.5 text-xs",
-                STATUS_COLOR[race.status],
-              )}
-            >
-              {STATUS_LABEL[race.status]}
-            </span>
-          </div>
-
-          <div className="mt-1 flex items-center gap-3 text-xs text-slate-400">
-            <span>{race.scheduled_time}</span>
-            <span>{race.weather}</span>
-            <span>風 {race.wind_speed}m</span>
-            <span>波 {race.wave_height}cm</span>
-          </div>
-
-          {race.top_pick && (
-            <div className="mt-2 flex items-center gap-1.5">
-              <span className="text-xs text-slate-500">AI推奨</span>
-              <span className="rounded bg-sky-900 px-2 py-0.5 text-xs text-sky-200">
-                {race.top_pick}
-              </span>
-              <span className="text-xs text-slate-400">
-                {(race.top_predicted_win * 100).toFixed(0)}%
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* 右カラム: 荒水指数 */}
-        <div className="shrink-0 text-right">
-          <div className="text-xs text-slate-500 mb-1">荒水指数</div>
-          <WaveIndex value={race.rough_water_index} />
-          {race.tide_phase && race.tide_phase !== "不明" && (
-            <div className="mt-0.5 text-xs text-slate-500">{race.tide_phase}</div>
-          )}
-        </div>
-      </div>
-    </a>
-  );
-}
-
-function SummaryBar({ races }: { races: RaceSummary[] }) {
-  const open = races.filter((r) => r.status === "open").length;
-  const upcoming = races.filter((r) => r.status === "upcoming").length;
-  const finished = races.filter((r) => r.status === "finished").length;
-  const venues = [...new Set(races.map((r) => r.jyo_name))];
-
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg bg-slate-800 px-4 py-2 text-sm">
-      <span className="text-slate-400">
-        {venues.length > 0 ? venues.join("・") : "—"}
-      </span>
-      <span className="ml-auto flex gap-3 text-xs">
-        <span className="text-green-400">発売中 {open}</span>
-        <span className="text-slate-400">発売前 {upcoming}</span>
-        <span className="text-slate-500">確定 {finished}</span>
-        <span className="text-slate-400">計 {races.length}R</span>
-      </span>
-    </div>
-  );
-}
-
-// ─── メインページ ────────────────────────────────────────────
-
-export default function HomePage() {
-  const [date, setDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  });
-  const [races, setRaces] = useState<RaceSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchRaces = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE;
-      const url = apiBase
-        ? `${apiBase}/api/races?date=${date}`
-        : `/api/races?date=${date}`;
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setRaces(data.races ?? []);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [date]);
-
-  // 日付変更時 or 初回
-  useEffect(() => {
-    fetchRaces();
-  }, [fetchRaces]);
-
-  // 5分ごとにポーリング
-  useEffect(() => {
-    const timer = setInterval(fetchRaces, 5 * 60 * 1000);
-    return () => clearInterval(timer);
-  }, [fetchRaces]);
-
-  const [filterStatus, setFilterStatus] = useState<RaceStatus | "all">("all");
-  const filtered =
-    filterStatus === "all" ? races : races.filter((r) => r.status === filterStatus);
-
-  return (
-    <div className="space-y-4">
-      {/* 日付ナビ */}
-      <DateNav date={date} onChange={setDate} />
-
-      {/* サマリーバー */}
-      {races.length > 0 && <SummaryBar races={races} />}
-
-      {/* フィルター */}
-      <div className="flex items-center gap-2">
-        {(["all", "open", "upcoming", "closed", "finished"] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setFilterStatus(s)}
-            className={clsx(
-              "rounded px-3 py-1 text-xs transition-colors",
-              filterStatus === s
-                ? "bg-sky-700 text-white"
-                : "bg-slate-800 text-slate-400 hover:bg-slate-700",
-            )}
-          >
-            {s === "all" ? "すべて" : STATUS_LABEL[s]}
-          </button>
-        ))}
-        <button
-          onClick={fetchRaces}
-          className="ml-auto text-xs text-slate-500 hover:text-slate-300"
+      <div className="container">
+        {/* ヘッダー */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            flexWrap: "wrap",
+            gap: "var(--space-3)",
+            marginBottom: "var(--space-8)",
+          }}
         >
-          ↻ 更新
-        </button>
-      </div>
+          <h2
+            style={{
+              fontSize: "var(--text-3xl)",
+              fontWeight: "var(--font-weight-bold)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            今日の注目レース
+          </h2>
+          <p
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            最終更新 {formatFetchedAt(fetchedAt)} ↻
+          </p>
+        </div>
 
-      {/* コンテンツ */}
-      {loading ? (
-        <div className="py-16 text-center text-slate-400">読み込み中…</div>
-      ) : error ? (
-        <div className="rounded-lg bg-red-950 p-4 text-sm text-red-300">
-          エラー: {error}
+        {/* レースカードグリッド */}
+        {races.length > 0 ? (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: "var(--space-4)",
+              marginBottom: "var(--space-8)",
+            }}
+          >
+            {races.map((race) => (
+              <RaceCard key={race.race_id} race={race} isPreview />
+            ))}
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: "var(--space-4)",
+              marginBottom: "var(--space-8)",
+            }}
+          >
+            {[1, 2, 3].map((i) => (
+              <RaceCardSkeleton key={i} />
+            ))}
+          </div>
+        )}
+
+        {/* セカンダリCTA */}
+        <div style={{ textAlign: "center" }}>
+          <Link
+            href="/races"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "var(--space-2)",
+              padding: "var(--space-3) var(--space-8)",
+              borderRadius: "var(--radius-full)",
+              border: "2px solid var(--color-cta-primary)",
+              color: "var(--color-cta-primary)",
+              fontSize: "var(--text-base)",
+              fontWeight: "var(--font-weight-bold)",
+              letterSpacing: "var(--tracking-wide)",
+              transition: "all var(--duration-normal) var(--easing-out)",
+              background: "transparent",
+              textDecoration: "none",
+            }}
+          >
+            全レースを見る →
+          </Link>
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="py-16 text-center text-slate-500">
-          {date} のレースデータがありません
+      </div>
+    </section>
+  );
+}
+
+// ─────────────────────────────────────────────
+// メインページコンポーネント
+// ─────────────────────────────────────────────
+export default function LandingPage() {
+  return (
+    <>
+      {/* ナビゲーション */}
+      <header
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+          height: "var(--nav-height)",
+          background: "var(--color-bg-overlay)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          borderBottom: "1px solid var(--color-border-default)",
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        <div
+          className="container"
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}
+        >
+          <Link
+            href="/"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "var(--space-2)",
+              fontWeight: "var(--font-weight-bold)",
+              fontSize: "var(--text-lg)",
+              color: "var(--color-text-primary)",
+              textDecoration: "none",
+            }}
+          >
+            <span aria-hidden="true">⛵</span>
+            <span>艇王</span>
+          </Link>
+          <nav aria-label="メインナビゲーション">
+            <Link
+              href="/races"
+              style={{
+                fontSize: "var(--text-sm)",
+                color: "var(--color-text-secondary)",
+                padding: "var(--space-2) var(--space-4)",
+                borderRadius: "var(--radius-full)",
+                border: "1px solid var(--color-border-default)",
+                textDecoration: "none",
+                transition: "all var(--duration-fast)",
+              }}
+            >
+              今日のレース
+            </Link>
+          </nav>
         </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((race) => (
-            <RaceCard key={race.race_id} race={race} />
-          ))}
-        </div>
-      )}
-    </div>
+      </header>
+
+      <main>
+        {/* ─── S1: ヒーロー ─── */}
+        <section
+          id="hero"
+          style={{
+            minHeight: "calc(100svh - var(--nav-height))",
+            background: `linear-gradient(
+              135deg,
+              var(--color-bg-primary) 0%,
+              var(--color-blue-900) 50%,
+              var(--color-bg-primary) 100%
+            )`,
+            display: "flex",
+            alignItems: "center",
+            padding: "var(--space-16) 0",
+            position: "relative",
+            overflow: "hidden",
+          }}
+        >
+          {/* 背景装飾: 波紋SVG */}
+          <svg
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              right: "-10%",
+              top: "50%",
+              transform: "translateY(-50%)",
+              opacity: 0.05,
+              width: "600px",
+              height: "600px",
+            }}
+            viewBox="0 0 400 400"
+            fill="none"
+          >
+            <circle cx="200" cy="200" r="150" stroke="#00c9b8" strokeWidth="1.5" />
+            <circle cx="200" cy="200" r="120" stroke="#00c9b8" strokeWidth="1" />
+            <circle cx="200" cy="200" r="90" stroke="#00c9b8" strokeWidth="0.8" />
+            <circle cx="200" cy="200" r="60" stroke="#00c9b8" strokeWidth="0.6" />
+            <circle cx="200" cy="200" r="30" stroke="#00c9b8" strokeWidth="0.5" />
+          </svg>
+
+          <div className="container" style={{ width: "100%" }}>
+            <div
+              style={{
+                maxWidth: "680px",
+                animation: "fadeInUp 0.6s var(--easing-out) both",
+              }}
+            >
+              {/* 検証中バッジ */}
+              <div style={{ marginBottom: "var(--space-6)" }}>
+                <VerificationBadge variant="validating" />
+              </div>
+
+              {/* H1 */}
+              <h1
+                style={{
+                  fontSize: "clamp(var(--text-3xl), 5vw, var(--text-5xl))",
+                  fontWeight: "var(--font-weight-black)",
+                  letterSpacing: "var(--tracking-tight)",
+                  lineHeight: "var(--leading-tight)",
+                  color: "var(--color-text-primary)",
+                  marginBottom: "var(--space-6)",
+                }}
+              >
+                AIが競艇を予想する、
+                <br />
+                無料で、正直に。
+              </h1>
+
+              {/* サブコピー */}
+              <p
+                style={{
+                  fontSize: "var(--text-lg)",
+                  color: "var(--color-text-secondary)",
+                  lineHeight: "var(--leading-relaxed)",
+                  marginBottom: "var(--space-8)",
+                  maxWidth: "480px",
+                }}
+              >
+                登録不要、すぐ使える。レース結果は全件公開—永久無料。
+              </p>
+
+              {/* CTA ボタン */}
+              <Link
+                href="/races"
+                aria-label="今日のレース一覧ページを開く"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "var(--space-2)",
+                  width: "100%",
+                  maxWidth: "320px",
+                  height: "56px",
+                  padding: "0 var(--space-8)",
+                  borderRadius: "var(--radius-full)",
+                  background: "var(--color-cta-primary)",
+                  color: "#ffffff",
+                  fontSize: "var(--text-lg)",
+                  fontWeight: "var(--font-weight-bold)",
+                  letterSpacing: "var(--tracking-wide)",
+                  boxShadow: "var(--shadow-cta)",
+                  textDecoration: "none",
+                  transition: "all var(--duration-normal) var(--easing-out)",
+                  marginBottom: "var(--space-6)",
+                }}
+              >
+                今日のレース一覧を見る →
+              </Link>
+
+              {/* 免責一行 */}
+              <p
+                style={{
+                  fontSize: "var(--text-xs)",
+                  color: "var(--color-text-muted)",
+                  lineHeight: "var(--leading-relaxed)",
+                }}
+              >
+                予想は参考情報です。舟券の購入は20歳以上・自己責任でお願いします。
+              </p>
+            </div>
+          </div>
+
+          {/* スクロール誘導矢印 */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: "var(--space-8)",
+              left: "50%",
+              transform: "translateX(-50%)",
+              animation: "fadeInUp 1s 0.8s both",
+            }}
+          >
+            <a
+              href="#features"
+              aria-label="スクロールして詳しく見る"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "var(--space-2)",
+                color: "var(--color-text-muted)",
+                textDecoration: "none",
+                fontSize: "var(--text-xs)",
+              }}
+            >
+              <span>スクロールして詳しく見る</span>
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                style={{ animation: "fadeInUp 1.5s ease infinite alternate" }}
+              >
+                <path
+                  d="M7 10l5 5 5-5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </a>
+          </div>
+        </section>
+
+        {/* ─── S2: 3つの特徴 ─── */}
+        <section id="features" style={{ padding: "var(--space-16) 0" }}>
+          <div className="container">
+            <h2
+              style={{
+                fontSize: "var(--text-3xl)",
+                fontWeight: "var(--font-weight-bold)",
+                textAlign: "center",
+                marginBottom: "var(--space-12)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              このサービスを選ぶ理由
+            </h2>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                gap: "var(--space-6)",
+              }}
+            >
+              {/* 特徴1: 完全無料 */}
+              <div
+                style={{
+                  background: "var(--color-bg-card)",
+                  border: "1px solid var(--color-border-default)",
+                  borderRadius: "var(--radius-lg)",
+                  padding: "var(--space-6)",
+                  boxShadow: "var(--shadow-card)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "var(--text-4xl)",
+                    marginBottom: "var(--space-4)",
+                  }}
+                  aria-hidden="true"
+                >
+                  💰
+                </div>
+                <h3
+                  style={{
+                    fontSize: "var(--text-xl)",
+                    fontWeight: "var(--font-weight-bold)",
+                    marginBottom: "var(--space-3)",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  完全無料・登録不要
+                </h3>
+                <p
+                  style={{
+                    fontSize: "var(--text-sm)",
+                    color: "var(--color-text-secondary)",
+                    lineHeight: "var(--leading-relaxed)",
+                  }}
+                >
+                  有料プランは存在しません。登録なしで今すぐ全機能を使えます。費用は永遠にゼロです。
+                </p>
+              </div>
+
+              {/* 特徴2: AIが全レース予想 */}
+              <div
+                style={{
+                  background: "var(--color-bg-card)",
+                  border: "1px solid var(--color-border-default)",
+                  borderRadius: "var(--radius-lg)",
+                  padding: "var(--space-6)",
+                  boxShadow: "var(--shadow-card)",
+                }}
+              >
+                <div
+                  style={{ fontSize: "var(--text-4xl)", marginBottom: "var(--space-4)" }}
+                  aria-hidden="true"
+                >
+                  🤖
+                </div>
+                <h3
+                  style={{
+                    fontSize: "var(--text-xl)",
+                    fontWeight: "var(--font-weight-bold)",
+                    marginBottom: "var(--space-3)",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  AIが全レース自動予想
+                </h3>
+                <p
+                  style={{
+                    fontSize: "var(--text-sm)",
+                    color: "var(--color-text-secondary)",
+                    lineHeight: "var(--leading-relaxed)",
+                  }}
+                >
+                  過去のレースデータをAI（LightGBM）が学習。24場・全レースを自動で分析します。
+                </p>
+              </div>
+
+              {/* 特徴3: 実績を全部公開 */}
+              <div
+                style={{
+                  background: "var(--color-bg-card)",
+                  border: "1px solid var(--color-border-default)",
+                  borderTop: "3px solid var(--color-teal-500)",
+                  borderRadius: "var(--radius-lg)",
+                  padding: "var(--space-6)",
+                  boxShadow: "var(--shadow-card)",
+                }}
+              >
+                <div
+                  style={{ fontSize: "var(--text-4xl)", marginBottom: "var(--space-4)" }}
+                  aria-hidden="true"
+                >
+                  📊
+                </div>
+                <h3
+                  style={{
+                    fontSize: "var(--text-xl)",
+                    fontWeight: "var(--font-weight-bold)",
+                    marginBottom: "var(--space-3)",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  実績を全件公開します
+                </h3>
+                <p
+                  style={{
+                    fontSize: "var(--text-sm)",
+                    color: "var(--color-text-secondary)",
+                    lineHeight: "var(--leading-relaxed)",
+                  }}
+                >
+                  当たっても外れても、的中率・回収率を全件記録してオープンにします。隠す数字はありません。
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ─── S3: 今日のレースプレビュー (動的・Server Component) ─── */}
+        <Suspense
+          fallback={
+            <section
+              style={{
+                background: "var(--color-bg-secondary)",
+                padding: "var(--space-16) 0",
+              }}
+            >
+              <div className="container">
+                <h2
+                  style={{
+                    fontSize: "var(--text-3xl)",
+                    fontWeight: "var(--font-weight-bold)",
+                    marginBottom: "var(--space-8)",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  今日の注目レース
+                </h2>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+                    gap: "var(--space-4)",
+                  }}
+                >
+                  {[1, 2, 3].map((i) => (
+                    <RaceCardSkeleton key={i} />
+                  ))}
+                </div>
+              </div>
+            </section>
+          }
+        >
+          <RacePreviewSection />
+        </Suspense>
+
+        {/* ─── S4: AIの仕組み ─── */}
+        <section id="how" style={{ padding: "var(--space-16) 0" }}>
+          <div className="container">
+            <h2
+              style={{
+                fontSize: "var(--text-3xl)",
+                fontWeight: "var(--font-weight-bold)",
+                textAlign: "center",
+                marginBottom: "var(--space-12)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              AIが予想する仕組み
+            </h2>
+
+            {/* 4ステップフロー */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                gap: "var(--space-6)",
+                marginBottom: "var(--space-10)",
+              }}
+            >
+              {[
+                {
+                  step: "①",
+                  title: "データ収集",
+                  body: "過去のレース情報・選手成績・天候・艇番データを収集",
+                },
+                {
+                  step: "②",
+                  title: "AI学習",
+                  body: "LightGBM（機械学習）が勝ちパターンを自動で学習します",
+                },
+                {
+                  step: "③",
+                  title: "予想生成",
+                  body: "学習したパターンから各レースの1着を予測・スコアを算出",
+                },
+                {
+                  step: "④",
+                  title: "結果を全件公開",
+                  body: "的中率・回収率をリアルタイムで公開。隠しません。",
+                  accent: true,
+                },
+              ].map(({ step, title, body, accent }) => (
+                <div
+                  key={step}
+                  style={{
+                    background: "var(--color-bg-card)",
+                    border: accent
+                      ? "2px solid var(--color-teal-500)"
+                      : "1px solid var(--color-border-default)",
+                    borderRadius: "var(--radius-lg)",
+                    padding: "var(--space-6)",
+                    boxShadow: accent ? "var(--shadow-glow-teal)" : "var(--shadow-card)",
+                  }}
+                >
+                  <p
+                    style={{
+                      fontSize: "var(--text-2xl)",
+                      fontWeight: "var(--font-weight-black)",
+                      color: "var(--color-teal-500)",
+                      marginBottom: "var(--space-3)",
+                    }}
+                  >
+                    {step}
+                  </p>
+                  <h3
+                    style={{
+                      fontSize: "var(--text-lg)",
+                      fontWeight: "var(--font-weight-bold)",
+                      marginBottom: "var(--space-2)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    {title}
+                  </h3>
+                  <p
+                    style={{
+                      fontSize: "var(--text-sm)",
+                      color: "var(--color-text-secondary)",
+                      lineHeight: "var(--leading-relaxed)",
+                    }}
+                  >
+                    {body}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* LightGBM補足説明 */}
+            <div
+              style={{
+                maxWidth: "640px",
+                margin: "0 auto",
+                padding: "var(--space-4) var(--space-6)",
+                background: "var(--color-bg-secondary)",
+                borderRadius: "var(--radius-lg)",
+                border: "1px solid var(--color-border-default)",
+              }}
+            >
+              <p
+                style={{
+                  fontSize: "var(--text-sm)",
+                  color: "var(--color-text-secondary)",
+                  lineHeight: "var(--leading-relaxed)",
+                }}
+              >
+                <strong style={{ color: "var(--color-text-primary)" }}>LightGBMとは？</strong>
+                　Microsoftが開発した高精度機械学習ライブラリ。スポーツ予測・金融モデリングで世界中のデータサイエンティストが使っています。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* ─── S5: ロードマップ ─── */}
+        <section
+          id="roadmap"
+          style={{
+            background: "var(--color-bg-secondary)",
+            padding: "var(--space-16) 0",
+          }}
+        >
+          <div className="container">
+            <div style={{ marginBottom: "var(--space-12)" }}>
+              <h2
+                style={{
+                  fontSize: "var(--text-3xl)",
+                  fontWeight: "var(--font-weight-bold)",
+                  color: "var(--color-text-primary)",
+                  marginBottom: "var(--space-2)",
+                }}
+              >
+                開発ロードマップ
+              </h2>
+              <p
+                style={{
+                  fontSize: "var(--text-lg)",
+                  color: "var(--color-teal-500)",
+                  fontWeight: "var(--font-weight-medium)",
+                }}
+              >
+                「準備中」を隠しません
+              </p>
+            </div>
+            <RoadmapTimeline />
+          </div>
+        </section>
+
+        {/* ─── S6: FAQ ─── */}
+        <section id="faq" style={{ padding: "var(--space-16) 0" }}>
+          <div className="container">
+            <h2
+              style={{
+                fontSize: "var(--text-3xl)",
+                fontWeight: "var(--font-weight-bold)",
+                textAlign: "center",
+                marginBottom: "var(--space-12)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              よくある質問
+            </h2>
+            <FaqAccordion />
+          </div>
+        </section>
+      </main>
+
+      {/* ─── S7: フッター ─── */}
+      <Footer />
+    </>
   );
 }
