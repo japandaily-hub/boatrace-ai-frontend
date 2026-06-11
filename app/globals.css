@@ -252,3 +252,13 @@ button {
   animation: shimmer 1.5s infinite;
   border-radius: var(--radius-md);
 }
+
+/* ─── RaceCard Hover (CSS replaces JS onMouseEnter/onMouseLeave) ─── */
+.race-card-hover {
+  transition: border-color var(--duration-fast), transform var(--duration-fast), box-shadow var(--duration-fast);
+}
+.race-card-hover:hover {
+  border-color: rgba(0, 201, 184, 0.3) !important;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}

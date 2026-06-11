@@ -126,7 +126,6 @@ export function RaceCard({ race, isPreview = false }: RaceCardProps) {
     padding: "var(--space-5)",
     boxShadow: "var(--shadow-card)",
     position: "relative",
-    transition: `border-color var(--duration-fast), transform var(--duration-fast), box-shadow var(--duration-fast)`,
     cursor: "pointer",
   };
 
@@ -136,19 +135,8 @@ export function RaceCard({ race, isPreview = false }: RaceCardProps) {
       aria-label={`${race.jyo_name} 第${race.race_number}レース ${formatTime(race.scheduled_time)}（${isPreview ? "準備中" : statusBadge.label}）`}
     >
       <Tag
+        className="race-card-hover"
         style={cardStyle}
-        onMouseEnter={(e) => {
-          const el = e.currentTarget as HTMLElement;
-          el.style.borderColor = "rgba(0, 201, 184, 0.3)";
-          el.style.transform = "translateY(-2px)";
-          el.style.boxShadow = "var(--shadow-lg)";
-        }}
-        onMouseLeave={(e) => {
-          const el = e.currentTarget as HTMLElement;
-          el.style.borderColor = "var(--color-border-default)";
-          el.style.transform = "translateY(0)";
-          el.style.boxShadow = "var(--shadow-card)";
-        }}
       >
         {/* 検証中バッジ — 右上固定 */}
         <div
